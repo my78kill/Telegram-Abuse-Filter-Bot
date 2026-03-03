@@ -2,7 +2,6 @@ import os
 import re
 import logging
 import motor.motor_asyncio
-from flask import Flask, request
 from dotenv import load_dotenv
 from telegram import Update, ChatMember
 from telegram.constants import ParseMode
@@ -19,6 +18,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 MONGO_URI = os.getenv("MONGO_URI")
 OWNER_ID = int(os.getenv("OWNER_ID", "7563434309"))
+RENDER_URL = os.getenv("RENDER_EXTERNAL_URL")
 
 # ---------------- LOGGING ----------------
 logging.basicConfig(
@@ -46,6 +46,7 @@ WARNING_MESSAGES = {
     6: "🔥 {mention}, banned!"
 }
 
+# ---------------- LOAD ABUSE WORDS ----------------
 def load_abusive_words():
     if os.path.exists(ABUSE_FILE):
         with open(ABUSE_FILE, "r", encoding="utf-8") as f:
@@ -54,10 +55,7 @@ def load_abusive_words():
 
 ABUSIVE_WORDS = load_abusive_words()
 
-# ---------------- TELEGRAM APP ----------------
-application = Application.builder().token(BOT_TOKEN).build()
-
-# ---------------- PERMISSION CHECKS ----------------
+# ---------------- PERMISSION CHECK ----------------
 async def is_admin(chat, user_id):
     if user_id in ALLOWED_USERS:
         return True
@@ -81,21 +79,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🚨 Anti-Abuse Bot Active!\n\n"
         "Use /admin on OR /admin off\n"
-        "Use /auth by replying\n"
-        "Use /unauth by replying"
+        "Use /auth (reply)\n"
+        "Use /unauth (reply)"
     )
 
 async def admin_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("Usage: /admin on OR /admin off")
-        return
+        return await update.message.reply_text("Usage: /admin on OR /admin off")
 
     chat = update.effective_chat
     sender_id = update.effective_user.id
 
     if not await is_owner(chat, sender_id):
-        await update.message.reply_text("🚫 Only group owner allowed.")
-        return
+        return await update.message.reply_text("🚫 Only group owner allowed.")
 
     filtering = context.args[0].lower() == "on"
 
@@ -111,20 +107,15 @@ async def admin_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.reply_to_message:
-        await update.message.reply_text("Reply to a user.")
-        return
+        return await update.message.reply_text("Reply to a user.")
 
-    chat = update.effective_chat
-    admin_id = update.effective_user.id
-
-    if not await is_admin(chat, admin_id):
-        await update.message.reply_text("Admins only.")
-        return
+    if not await is_admin(update.effective_chat, update.effective_user.id):
+        return await update.message.reply_text("Admins only.")
 
     target = update.message.reply_to_message.from_user
 
     await authorized_users_collection.update_one(
-        {"group_id": chat.id, "user_id": target.id},
+        {"group_id": update.effective_chat.id, "user_id": target.id},
         {"$set": {"user_name": target.first_name}},
         upsert=True
     )
@@ -136,28 +127,22 @@ async def auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def unauth(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.reply_to_message:
-        await update.message.reply_text("Reply to a user.")
-        return
+        return await update.message.reply_text("Reply to a user.")
 
-    chat = update.effective_chat
-    admin_id = update.effective_user.id
-
-    if not await is_admin(chat, admin_id):
-        await update.message.reply_text("Admins only.")
-        return
+    if not await is_admin(update.effective_chat, update.effective_user.id):
+        return await update.message.reply_text("Admins only.")
 
     target = update.message.reply_to_message.from_user
 
     await authorized_users_collection.delete_one(
-        {"group_id": chat.id, "user_id": target.id}
+        {"group_id": update.effective_chat.id, "user_id": target.id}
     )
 
     await update.message.reply_text("❌ User unauthorized.")
 
 async def block(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
-        await update.message.reply_text("🚫 Not allowed.")
-        return
+        return await update.message.reply_text("🚫 Not allowed.")
 
     await update.message.reply_text("Leaving group.")
     await context.bot.leave_chat(update.effective_chat.id)
@@ -196,7 +181,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text(text, parse_mode=ParseMode.MARKDOWN)
 
-# ---------------- HANDLERS ----------------
+# ---------------- APP SETUP ----------------
+application = Application.builder().token(BOT_TOKEN).build()
+
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("admin", admin_control))
 application.add_handler(CommandHandler("auth", auth))
@@ -204,28 +191,11 @@ application.add_handler(CommandHandler("unauth", unauth))
 application.add_handler(CommandHandler("block", block))
 application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# ---------------- FLASK WEBHOOK ----------------
-flask_app = Flask(__name__)
-
-@flask_app.post(f"/{BOT_TOKEN}")
-async def webhook():
-    update = Update.de_json(request.get_json(force=True), application.bot)
-    await application.process_update(update)
-    return "ok"
-
-@flask_app.get("/")
-def home():
-    return "Bot is Live 🚀"
-
-# ---------------- STARTUP ----------------
-async def setup():
-    await application.initialize()
-    await application.start()
-    render_url = os.getenv("RENDER_EXTERNAL_URL")
-    if render_url:
-        await application.bot.set_webhook(f"{render_url}/{BOT_TOKEN}")
-
+# ---------------- RUN WEBHOOK ----------------
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(setup())
-    flask_app.run(host="0.0.0.0", port=10000)
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=10000,
+        url_path=BOT_TOKEN,
+        webhook_url=f"{RENDER_URL}/{BOT_TOKEN}",
+    )
