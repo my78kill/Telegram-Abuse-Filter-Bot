@@ -1,6 +1,5 @@
-python-telegram-bot
-python-dotenv
-asyncio
+Flask
+gunicorn
+python-telegram-bot==20.7
 motor
-pymongo
-requests
+python-dotenv
