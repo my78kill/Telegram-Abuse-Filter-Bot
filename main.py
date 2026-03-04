@@ -92,8 +92,9 @@ async def admin_control(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat = update.effective_chat
     sender_id = update.effective_user.id
 
-    if not await is_owner(chat, sender_id):
-        return await update.message.reply_text("🚫 Only group owner allowed.")
+    # Allow all admins
+    if not await is_admin(chat, sender_id):
+        return await update.message.reply_text("🚫 Admins only.")
 
     filtering = context.args[0].lower() == "on"
 
