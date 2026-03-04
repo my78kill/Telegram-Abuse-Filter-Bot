@@ -56,22 +56,24 @@ def load_abusive_words():
 ABUSIVE_WORDS = load_abusive_words()
 
 # ---------------- PERMISSION CHECK ----------------
+
 async def is_admin(chat, user_id):
     if user_id in ALLOWED_USERS:
         return True
     try:
         member = await chat.get_member(user_id)
-        return member.status in [ChatMember.ADMINISTRATOR, ChatMember.OWNER]
-    except:
+        return member.status in ["administrator", "creator"]
+    except Exception:
         return False
+
 
 async def is_owner(chat, user_id):
     if user_id in ALLOWED_USERS:
         return True
     try:
         member = await chat.get_member(user_id)
-        return member.status == ChatMember.OWNER
-    except:
+        return member.status == "creator"
+    except Exception:
         return False
 
 # ---------------- COMMANDS ----------------
